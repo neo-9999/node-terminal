@@ -6,7 +6,7 @@ const { WebSocketServer } = require('ws');
 const PORT = process.env.SERVER_PORT || 16895;
 const PASSWORD = 'mysecret.#';
 
-// 1. 创建 HTTP 服务器托管网页端
+// 1. 创建 HTTP 服务，托管基于 xterm.js 的网页终端界面
 const server = http.createServer((req, res) => {
     if (req.url === '/') {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -32,6 +32,7 @@ const server = http.createServer((req, res) => {
                     term.open(document.getElementById('terminal'));
                     fitAddon.fit();
 
+                    // 自动适配 HTTPS 对应的 wss:// 协议
                     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
                     const ws = new WebSocket(\`\${protocol}//\${location.host}\`);
 
@@ -39,14 +40,12 @@ const server = http.createServer((req, res) => {
                         term.write(event.data);
                     };
 
-                    // 修复：确保回车键能正确发送 \r
                     term.onKey(({ key, domEvent }) => {
                         let ev = domEvent;
                         let printable = !ev.altKey && !ev.ctrlKey && !ev.metaKey;
                         if (ev.keyCode === 13) {
                             ws.send('\\r');
                         } else if (ev.keyCode === 8) {
-                            // Backspace
                             ws.send('\\b');
                         } else if (printable) {
                             ws.send(key);
@@ -70,7 +69,7 @@ const wss = new WebSocketServer({ server });
 wss.on('connection', (ws) => {
     let authenticated = false;
     let passBuffer = '';
-    let sh = null;
+    let shell = null;
 
     ws.send("Password:");
 
@@ -81,20 +80,30 @@ wss.on('connection', (ws) => {
             if (input === '\r' || input === '\n') {
                 if (passBuffer === PASSWORD) {
                     authenticated = true;
-                    ws.send("\r\nAccess Granted. Welcome to the container shell!\r\n");
+                    ws.send("\r\nAccess Granted. Welcome to the container shell!\r\n\r\n");
                     
-                    // 认证成功后，启动 Python PTY 伪终端
-                    sh = spawn('python3', ['-c', 'import pty; pty.spawn("/bin/bash")']);
-
-                    // 实时将终端输出返回给网页
-                    sh.stdout.on('data', (data) => {
-                        ws.send(data.toString());
-                    });
-                    sh.stderr.on('data', (data) => {
-                        ws.send(data.toString());
+                    // 使用系统自带的 /bin/sh（Alpine 默认自带，绝对不需要安装 Python）
+                    shell = spawn('/bin/sh', [], {
+                        cwd: '/app',
+                        env: process.env
                     });
 
-                    sh.on('exit', () => {
+                    // 实时将 shell 输出返回给网页
+                    shell.stdout.on('data', (data) => {
+                        ws.send(data.toString());
+                    });
+                    shell.stderr.on('data', (data) => {
+                        ws.send(data.toString());
+                    });
+
+                    // 自动发送回车唤醒命令提示符
+                    setTimeout(() => {
+                        if (shell && shell.stdin.writable) {
+                            shell.stdin.write('export PS1="\\u@\\w\\$ "; clear\n');
+                        }
+                    }, 200);
+
+                    shell.on('exit', () => {
                         ws.close();
                     });
                 } else {
@@ -108,19 +117,19 @@ wss.on('connection', (ws) => {
                 }
             } else {
                 passBuffer += input;
-                ws.send('*'); // 回显星号
+                ws.send('*');
             }
         } else {
-            // 认证通过后，把所有输入直接传给 bash 进程
-            if (sh && sh.stdin.writable) {
-                sh.stdin.write(message);
+            // 认证通过后，将用户输入交个标准 shell
+            if (shell && shell.stdin.writable) {
+                shell.stdin.write(message);
             }
         }
     });
 
     ws.on('close', () => {
-        if (sh) {
-            sh.kill();
+        if (shell) {
+            shell.kill();
         }
     });
 });
