@@ -6,5 +6,7 @@
   "scripts": {
     "start": "node index.js"
   },
-  "dependencies": {}
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
 }
