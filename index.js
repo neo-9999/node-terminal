@@ -118,7 +118,7 @@ wss.on('connection', (ws) => {
 
 server.listen(PORT, () => {
     console.log(`HTTPS/WS Terminal server running on port ${PORT}`);
-    #initBackgroundServices();
+    //initBackgroundServices();
 });
 
 // ====== 后台服务守护启动逻辑 ======
