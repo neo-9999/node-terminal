@@ -83,9 +83,10 @@ wss.on('connection', (ws) => {
                     ws.send("\r\nAccess Granted. Welcome to the container shell!\r\n\r\n");
                     
                     // 使用系统自带的 /bin/sh（Alpine 默认自带，绝对不需要安装 Python）
-                    shell = spawn('/bin/sh', [], {
+                    shell = spawn('/bin/sh', ['-i'], {
                         cwd: '/app',
-                        env: process.env
+                        env: process.env,
+                        stdio: ['pipe', 'pipe', 'pipe'] // 显式开通双向管道
                     });
 
                     // 实时将 shell 输出返回给网页
@@ -99,7 +100,7 @@ wss.on('connection', (ws) => {
                     // 自动发送回车唤醒命令提示符
                     setTimeout(() => {
                         if (shell && shell.stdin.writable) {
-                            shell.stdin.write('export PS1="\\u@\\w\\$ "; clear\n');
+                            shell.stdin.write('export PS1="\\u@\\w\\$ "; pwd\n');
                         }
                     }, 200);
 
