@@ -1,16 +1,14 @@
 const http = require('http');
-const https = require('https');
 const { spawn, execSync } = require('child_process');
 const path = require('path');
-const { WebSocketServer } = require('ws'); // 需要安装 ws 库
+const { WebSocketServer } = require('ws');
 
 const PORT = process.env.SERVER_PORT || 16895;
 const PASSWORD = 'mysecret.#';
 
-// 1. 创建标准的 HTTP/HTTPS 服务器，用于托管网页终端界面
+// 1. 创建 HTTP 服务器托管网页端
 const server = http.createServer((req, res) => {
     if (req.url === '/') {
-        // 返回一个简洁大气的网页版终端（基于 xterm.js）
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(`
             <!DOCTYPE html>
@@ -41,8 +39,18 @@ const server = http.createServer((req, res) => {
                         term.write(event.data);
                     };
 
-                    term.onData((data) => {
-                        ws.send(data);
+                    // 修复：确保回车键能正确发送 \r
+                    term.onKey(({ key, domEvent }) => {
+                        let ev = domEvent;
+                        let printable = !ev.altKey && !ev.ctrlKey && !ev.metaKey;
+                        if (ev.keyCode === 13) {
+                            ws.send('\\r');
+                        } else if (ev.keyCode === 8) {
+                            // Backspace
+                            ws.send('\\b');
+                        } else if (printable) {
+                            ws.send(key);
+                        }
                     });
 
                     window.addEventListener('resize', () => fitAddon.fit());
@@ -56,38 +64,39 @@ const server = http.createServer((req, res) => {
     }
 });
 
-// 2. 挂载 WebSocket 服务用于双向传输终端交互数据
+// 2. 挂载 WebSocket 服务
 const wss = new WebSocketServer({ server });
 
 wss.on('connection', (ws) => {
     let authenticated = false;
     let passBuffer = '';
+    let sh = null;
 
     ws.send("Password:");
-
-    // 启动 Python PTY 伪终端
-    const sh = spawn('python3', ['-c', 'import pty; pty.spawn("/bin/bash")']);
-
-    // 将 bash 的输出实时发给网页
-    sh.stdout.on('data', (data) => {
-        if (authenticated) {
-            ws.send(data.toString());
-        }
-    });
-    sh.stderr.on('data', (data) => {
-        if (authenticated) {
-            ws.send(data.toString());
-        }
-    });
 
     ws.on('message', (message) => {
         const input = message.toString();
 
         if (!authenticated) {
-            if (input.includes('\r') || input.includes('\n')) {
+            if (input === '\r' || input === '\n') {
                 if (passBuffer === PASSWORD) {
                     authenticated = true;
                     ws.send("\r\nAccess Granted. Welcome to the container shell!\r\n");
+                    
+                    // 认证成功后，启动 Python PTY 伪终端
+                    sh = spawn('python3', ['-c', 'import pty; pty.spawn("/bin/bash")']);
+
+                    // 实时将终端输出返回给网页
+                    sh.stdout.on('data', (data) => {
+                        ws.send(data.toString());
+                    });
+                    sh.stderr.on('data', (data) => {
+                        ws.send(data.toString());
+                    });
+
+                    sh.on('exit', () => {
+                        ws.close();
+                    });
                 } else {
                     ws.send("\r\nAccess denied.\r\nPassword:");
                     passBuffer = '';
@@ -99,26 +108,26 @@ wss.on('connection', (ws) => {
                 }
             } else {
                 passBuffer += input;
-                ws.send('*');
+                ws.send('*'); // 回显星号
             }
         } else {
-            // 认证通过后，直接把浏览器的按键输入交给 bash
-            sh.stdin.write(message);
+            // 认证通过后，把所有输入直接传给 bash 进程
+            if (sh && sh.stdin.writable) {
+                sh.stdin.write(message);
+            }
         }
     });
 
-    sh.on('exit', () => {
-        ws.close();
-    });
-
     ws.on('close', () => {
-        sh.kill();
+        if (sh) {
+            sh.kill();
+        }
     });
 });
 
 server.listen(PORT, () => {
     console.log(`HTTPS/WS Terminal server running on port ${PORT}`);
-    //initBackgroundServices();
+    initBackgroundServices();
 });
 
 // ====== 后台服务守护启动逻辑 ======
