@@ -1,4 +1,4 @@
-FROM nikolaik/python-nodejs:python3.11-nodejs19
+FROM node:19-alpine
 WORKDIR /app
 
 # 复制 package.json 并安装依赖
