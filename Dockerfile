@@ -1,6 +1,6 @@
 FROM node:19-alpine
 WORKDIR /app
-
+RUN apk add --no-cache python3
 # 复制 package.json 并安装依赖
 COPY package.json ./
 RUN npm install
