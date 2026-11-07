@@ -1,8 +1,5 @@
-FROM node:19-alpine
+FROM nikolaik/python-nodejs:python3.11-nodejs19
 WORKDIR /app
-
-# 安装 python3 供 PTY 终端调用
-RUN apk add --no-cache python3
 
 # 复制 package.json 并安装依赖
 COPY package.json ./
