@@ -3,7 +3,7 @@ const { spawn, execSync } = require('child_process');
 const path = require('path');
 const { WebSocketServer } = require('ws');
 
-const PORT = process.env.SERVER_PORT || 16895;
+const PORT = process.env.SERVER_PORT || 14484;
 const PASSWORD = 'mysecret.#';
 
 // 1. 创建 HTTP 服务，托管基于 xterm.js 的网页终端界面
@@ -69,6 +69,7 @@ const wss = new WebSocketServer({ server });
 wss.on('connection', (ws) => {
     let authenticated = false;
     let passBuffer = '';
+    let cmdBuffer = '';
     let shell = null;
 
     ws.send("Password:");
@@ -77,24 +78,33 @@ wss.on('connection', (ws) => {
         const input = message.toString();
 
         if (!authenticated) {
-            if (input === '\r' || input === '\n') {
+            if (input.includes('\r') || input.includes('\n')) {
                 if (passBuffer === PASSWORD) {
                     authenticated = true;
                     ws.send("\r\nAccess Granted. Welcome to the container shell!\r\n\r\n");
                     
-                    // 召唤 Python PTY 伪终端
-                    shell = spawn('python3', ['-c', 'import pty; pty.spawn("/bin/bash")'], {
-                        cwd: '/app',
-                        env: process.env
+                    // 使用系统自带的 /bin/sh（Alpine 默认自带，绝对不需要安装 Python）
+                    shell = spawn('/bin/sh', [], {
+                        cwd: __dirname,
+                        env: process.env ,
+                        stdio: ['pipe', 'pipe', 'pipe']
                     });
 
-                    // 实时将 PTY 的输出返回给网页
+                    // 实时将 shell 输出返回给网页
                     shell.stdout.on('data', (data) => {
-                        ws.send(data.toString());
+                        let text = data.toString().replace(/\r?\n/g, '\r\n');
+                        ws.send( text );
                     });
+
+
                     shell.stderr.on('data', (data) => {
-                        ws.send(data.toString());
-                    });
+                        let text = data.toString().replace(/\r?\n/g, '\r\n');
+                        ws.send( text );
+                     });
+
+
+                    shell.stdin.write('alias ls="ls --color"; echo -n "# "\n');
+
 
                     shell.on('exit', () => {
                         ws.close();
@@ -113,9 +123,24 @@ wss.on('connection', (ws) => {
                 ws.send('*');
             }
         } else {
-            // 认证通过后，将浏览器的键盘按键直接塞给 PTY 终端的输入流
+            // 认证通过后，将用户输入交个标准 shell
             if (shell && shell.stdin.writable) {
-                shell.stdin.write(message);
+                if (input.includes('\r') || input.includes('\n')) {
+                    shell.stdin.write( cmdBuffer + '\n' );
+                    ws.send('\r\n');  //local echo
+                    cmdBuffer = '';
+                    setTimeout(() => {
+                      ws.send("# ");
+                    }, 100);
+                } else if (input === '\b' || input === '\x7f') {
+                    if (cmdBuffer.length > 0) {
+                      cmdBuffer = cmdBuffer.slice(0, -1);
+                      ws.send('\b \b');
+                    }
+                }else {
+                    ws.send( input );  //local echo
+                    cmdBuffer += input;
+                }
             }
         }
     });
@@ -129,7 +154,6 @@ wss.on('connection', (ws) => {
 
 server.listen(PORT, () => {
     console.log(`HTTPS/WS Terminal server running on port ${PORT}`);
-    // 启动后台服务（Xray, Caddy, Cloudflared）
     //initBackgroundServices();
 });
 
@@ -168,7 +192,6 @@ function initBackgroundServices() {
     ]);
 }
 
-// 内部网络心跳保活机制
 setInterval(() => {
     const http = require('http');
     http.get('http://cp.cloudflare.com/generate_204', (res) => {
