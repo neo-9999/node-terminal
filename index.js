@@ -71,6 +71,7 @@ wss.on('connection', (ws) => {
     let passBuffer = '';
     let cmdBuffer = '';
     let shell = null;
+    let heartbeatInterval = null ;
 
     ws.send("Password:");
 
@@ -153,7 +154,9 @@ wss.on('connection', (ws) => {
     });
 
     ws.on('close', () => {
-        clearInterval(heartbeatInterval);
+        if ( heartbeatInterval ) {
+            clearInterval(heartbeatInterval);
+        }
         if (shell) {
             shell.kill();
         }
