@@ -82,7 +82,14 @@ wss.on('connection', (ws) => {
                 if (passBuffer === PASSWORD) {
                     authenticated = true;
                     ws.send("\r\nAccess Granted. Welcome to the container shell!\r\n\r\n");
-                    
+
+                    const heartbeatInterval = setInterval(() => {
+                        if (ws.readyState === ws.OPEN) {
+                            ws.ping(); // 发送底层 ping 帧保活
+                        } else {
+                            clearInterval(heartbeatInterval);
+                        }
+                    }, 30000);
                     // 使用系统自带的 /bin/sh（Alpine 默认自带，绝对不需要安装 Python）
                     shell = spawn('/bin/sh', [], {
                         cwd: __dirname,
@@ -146,6 +153,7 @@ wss.on('connection', (ws) => {
     });
 
     ws.on('close', () => {
+        clearInterval(heartbeatInterval);
         if (shell) {
             shell.kill();
         }
