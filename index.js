@@ -84,7 +84,7 @@ wss.on('connection', (ws) => {
                     authenticated = true;
                     ws.send("\r\nAccess Granted. Welcome to the container shell!\r\n\r\n");
 
-                    const heartbeatInterval = setInterval(() => {
+                    heartbeatInterval = setInterval(() => {
                         if (ws.readyState === ws.OPEN) {
                             ws.ping(); // 发送底层 ping 帧保活
                         } else {
