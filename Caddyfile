@@ -1,0 +1,26 @@
+{
+        admin off
+        auto_https off
+        log {
+                level ERROR
+        }
+}
+
+(web_config)
+{
+        @xapi path /xapi /xapi/*    
+        reverse_proxy @xapi 127.0.0.1:10001
+
+        handle /api/v1/login {
+                header Content-Type application/json
+                respond `{"status":"error","message":"Security alert: Error username or password, or access denied from unauthorized IP location."}` 403
+        }
+        file_server {
+                root /home/container/www
+        }
+}
+
+:8080 {
+        bind 127.0.0.1
+        import web_config
+}

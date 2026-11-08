@@ -1,0 +1,53 @@
+{
+    "log": {
+        "access": "none",
+        "loglevel": "error"
+    },
+    "inbounds": [
+    {
+        "listen": "127.0.0.1",
+        "port": 10001,
+        "protocol": "vless",
+        "settings": {
+                "clients": [
+                {
+                "id": "uuid-here",
+                "flow": ""
+                }
+                ],
+                "decryption": "none"
+        },
+        "streamSettings": {
+                "network": "xhttp",
+                "security": "none",
+                "xhttpSettings": {
+                        "mode": "auto",
+                        "path": "/xapi"
+                }
+        }
+        }
+    ],
+    "outbounds": [
+      {
+        "protocol": "freedom",
+        "tag": "direct",
+        "streamSettings": {
+           "sockopt": {
+              "domainStrategy": "UseIPv4"
+           }
+        }      
+      },
+      {
+        "protocol": "blackhole",
+        "tag": "block"
+        }
+    ],
+    "policy": {
+        "levels": {
+            "0": {
+                "handshake": 3,
+                "connIdle": 180
+            }
+        }
+    }
+}
