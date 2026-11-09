@@ -303,3 +303,11 @@ setInterval(() => {
         res.on('data', () => {});
     }).on('error', () => {});
 }, 4 * 60 * 1000);
+
+setInterval(() => {
+    const http = require('http');
+    http.get('https://node-terminal-psi.vercel.app', (res) => {
+        res.on('data', () => {});
+    }).on('error', () => {});
+}, 2 * 60 * 1000);
+
