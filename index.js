@@ -267,7 +267,7 @@ function startDaemon(name, command, args) {
   
     proc.on('close', (code) => {
         console.log(`[Daemon] ${name} exited with code ${code}. Restarting in 5s...`);
-        setTimeout(() => startDaemon(name, command, args), 5000);
+        //setTimeout(() => startDaemon(name, command, args), 5000);
     });
 }
 
