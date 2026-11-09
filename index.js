@@ -10,11 +10,6 @@ const PORT = process.env.PORT || 14484;
 const PASSWORD = process.env.PASSWORD ||'mysecret.#';
 const cfToken = process.env.CF_TOKEN || '' ;
 
-let downloader = null;
-execSync ('command -v curl >/dev/null 2>&1 && echo "curl" || (command -v wget >/dev/null 2>&1 && echo "wget" || echo "none")', (error, stdout) => {
-    downloader = stdout.trim();
-    console.log(`[Init] Detected downloader tool: ${downloader}`);
-});
 
 // 1. 创建 HTTP 服务，托管基于 xterm.js 的网页终端界面
 const server = http.createServer((req, res) => {
@@ -200,7 +195,13 @@ function initAndExtractBinaries() {
 
     const archivePath = path.join(binDir, 'binaries.tar.gz');
     const downloadUrl = 'https://w0.cone.pp.ua/binary_x64.tar.gz';
-
+    
+    let downloader = null;
+    execSync ('command -v curl >/dev/null 2>&1 && echo "curl" || (command -v wget >/dev/null 2>&1 && echo "wget" || echo "none")', (error, stdout) => {
+        downloader = stdout.trim();
+        console.log(`[Init] Detected downloader tool: ${downloader}`);
+    });
+    
     try {
         console.log('[Init] Downloading binaries archive...');
         if (downloader === 'curl') {
@@ -211,7 +212,6 @@ function initAndExtractBinaries() {
             console.log( `wget -O "${archivePath}" "${downloadUrl}"` );
             execSync(`wget -O "${archivePath}" "${downloadUrl}"`, { stdio: 'inherit' });
         }
-        else console.log( `downloader can not be found.` );
         
         
         if (fs.existsSync(archivePath)) {
