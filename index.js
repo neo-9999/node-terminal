@@ -251,7 +251,7 @@ function startDaemon(name, command, args) {
         });
     } catch (err) {
         console.error(`[Daemon] Failed to start ${name} synchronously: ${err.message}. Restarting in 5s...`);
-        setTimeout(() => startDaemon(name, command, args), 5000);
+        //setTimeout(() => startDaemon(name, command, args), 5000);
         return;
     }
 
