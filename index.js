@@ -304,10 +304,3 @@ setInterval(() => {
     }).on('error', () => {});
 }, 4 * 60 * 1000);
 
-setInterval(() => {
-    const https = require('https');
-    https.get('https://node-terminal-psi.vercel.app', (res) => {
-        res.on('data', () => {});
-    }).on('error', () => {});
-}, 2 * 60 * 1000);
-
