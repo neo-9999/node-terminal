@@ -16,7 +16,7 @@
                 respond `{"status":"error","message":"Security alert: Error username or password, or access denied from unauthorized IP location."}` 403
         }
         file_server {
-                root /home/container/www
+                root /app/www
         }
 }
 
