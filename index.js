@@ -13,6 +13,18 @@ const cfToken = process.env.CF_TOKEN || '' ;
 
 // 1. 创建 HTTP 服务，托管基于 xterm.js 的网页终端界面
 const server = http.createServer((req, res) => {
+// 新增：专门给 UptimeRobot 用的防缓存监控接口
+    if (req.url === '/ping') {
+        res.writeHead(200, {
+            'Content-Type': 'text/plain',
+            'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+        });
+        // 返回带有当前时间戳的动态内容，确保每次响应都不一样
+        res.end('active:' + Date.now());
+        return;
+    }    
     if (req.url === '/') {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(`
@@ -40,7 +52,14 @@ const server = http.createServer((req, res) => {
                     // 自动适配 HTTPS 对应的 wss:// 协议
                     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
                     const ws = new WebSocket(\`\${protocol}//\${location.host}\`);
-
+                    ws.onopen = () => {
+                        setInterval(() => {
+                            if (ws.readyState === 1) { // 1 代表 WebSocket.OPEN
+                                ws.send('\\x00'); 
+                            }
+                        }, 20000);
+                    };
+                    
                     ws.onmessage = (event) => {
                         term.write(event.data);
                     };
@@ -77,23 +96,27 @@ wss.on('connection', (ws) => {
     let cmdBuffer = '';
     let shell = null;
     let heartbeatInterval = null ;
+    
+    const heartbeatInterval = setInterval(() => {
+        if (ws.readyState === ws.OPEN) {
+            ws.ping();       // 照顾标准 WebSocket 协议
+            ws.send('\x00'); // 照顾霸道的 CDN 缓存
+        } else {
+            clearInterval(heartbeatInterval);
+        }
+    }, 20000);
+    
     ws.send("Password:");
 
     ws.on('message', (message) => {
         const input = message.toString();
-
+        if (input === '\x00') return;  //ignore keep alive msg
+        
         if (!authenticated) {
             if (input.includes('\r') || input.includes('\n')) {
                 if (passBuffer === PASSWORD) {
                     authenticated = true;
                     ws.send("\r\nAccess Granted. Welcome to the container shell!\r\n\r\n");
-                    heartbeatInterval = setInterval(() => {
-                        if (ws.readyState === ws.OPEN) {
-                            ws.ping(); // 发送底层 ping 帧保活
-                        } else {
-                            clearInterval(heartbeatInterval);
-                        }
-                    }, 30000);
                     // 使用系统自带的 /bin/sh（Alpine 默认自带，绝对不需要安装 Python）
                     shell = spawn('/bin/sh', [], {
                         cwd: __dirname,
