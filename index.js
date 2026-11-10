@@ -95,7 +95,6 @@ wss.on('connection', (ws) => {
     let passBuffer = '';
     let cmdBuffer = '';
     let shell = null;
-    let heartbeatInterval = null ;
     
     const heartbeatInterval = setInterval(() => {
         if (ws.readyState === ws.OPEN) {
