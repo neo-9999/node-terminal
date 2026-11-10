@@ -315,7 +315,7 @@ function initBackgroundServices() {
     
     
     startDaemon('Cloudflared', cfBin, [
-        'tunnel', '--no-autoupdate', '--edge-ip-version', '4', '--protocol', 'http2', 'run', '--token', cfToken
+        'tunnel', '--no-autoupdate', '--edge-ip-version', '4', '--loglevel' , 'error' , '--protocol', 'http2', 'run', '--token', cfToken
     ]);
 }
 
