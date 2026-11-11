@@ -119,15 +119,7 @@ wss.on('connection', (ws) => {
                     authenticated = true;
                     ws.send("\r\nAccess Granted. Welcome to the container shell!\r\n\r\n");
                     
-                    const profilePath = path.join( __dirname, '.profile');
-                    try {
-                        fs.writeFileSync(profilePath, 'alias ls="ls --color"\n' , 'utf8');
-                        console.log('[Init] 已自动写入终端初始化配置到 .profile');
-                      } catch (err) {
-                        console.error('[Init] 写入初始化配置失败:', err.message);
-                    }
-
-                    
+                  
                     // 使用系统自带的 /bin/sh（Alpine 默认自带，绝对不需要安装 Python）
                   
                     shell = pty.spawn('/bin/sh', ['-l'], {
@@ -192,6 +184,15 @@ function initAndExtractBinaries() {
     const binDir = __dirname;
     const markerFile = path.join(binDir, '.extracted'); // 用一个标记文件防止每次重启重复下载
 
+
+    const profilePath = path.join( __dirname, '.profile');
+    try {
+        fs.writeFileSync(profilePath, 'alias ls="ls --color"\n' , 'utf8');
+        console.log('[Init] Successed to prepare .profile ');
+    } catch (err) {
+        console.error('[Init] Failed to prepare .profile:', err.message);
+    }
+    
     // 如果已经解压过了，直接跳过
     if (fs.existsSync(markerFile)) {
         console.log('[Init] Binaries already extracted.');
