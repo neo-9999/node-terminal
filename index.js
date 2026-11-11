@@ -140,7 +140,7 @@ wss.on('connection', (ws) => {
                         if ( shell ) {
                           let input = msg.toString();
                           if (input === '\x7f' || input === '\b') shell.write('\x7f');
-                          else shell.write(msg);
+                          else if ( !(input === '\x00') ) shell.write(msg);
                         }
                      });
 
