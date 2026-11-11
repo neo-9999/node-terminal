@@ -53,13 +53,14 @@ const server = http.createServer((req, res) => {
                     // 自动适配 HTTPS 对应的 wss:// 协议
                     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
                     const ws = new WebSocket(\`\${protocol}//\${location.host}\`);
-                    ws.onopen = () => {
-                        setInterval(() => {
-                            if (ws.readyState === 1) { // 1 代表 WebSocket.OPEN
-                                ws.send('\\x00'); 
-                            }
-                        }, 20000);
-                    };
+                    
+//                    ws.onopen = () => {
+//                        setInterval(() => {
+//                            if (ws.readyState === 1) { // 1 代表 WebSocket.OPEN
+//                                ws.send('\\x00'); 
+//                            }
+//                        }, 20000);
+//                    };
                     
                     ws.onmessage = (event) => {
                         term.write(event.data);
