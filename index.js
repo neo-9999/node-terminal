@@ -5,6 +5,23 @@ const { WebSocketServer } = require('ws');
 //for download files.
 const fs = require('fs');
 const pty = require('node-pty');
+// 【新增】：引入并创建 http-proxy 实例
+const httpProxy = require('http-proxy');
+const proxy = httpProxy.createProxyServer({
+    ws: true,
+    proxyTimeout: 0,
+    timeout: 0
+});
+
+// 代理错误处理，防止后端服务未启动时导致主程序崩溃
+proxy.on('error', (err, req, res) => {
+    console.error('[Proxy Error]', err.message);
+    if (res && res.writeHead) {
+        res.writeHead(502, { 'Content-Type': 'text/plain' });
+        res.end('502 Bad Gateway');
+    }
+});
+
 
 require('dotenv').config();
 const PORT = process.env.PORT || 14484;
@@ -26,7 +43,7 @@ const server = http.createServer((req, res) => {
         res.end('active:' + Date.now());
         return;
     }    
-    if (req.url === '/') {
+    if (req.url === '/term' || req.url.startsWith('/term/')) {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(`
             <!DOCTYPE html>
@@ -52,7 +69,8 @@ const server = http.createServer((req, res) => {
 
                     // 自动适配 HTTPS 对应的 wss:// 协议
                     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-                    const ws = new WebSocket(\`\${protocol}//\${location.host}\`);
+                    //point to /term
+                    const ws = new WebSocket(\`\${protocol}//\${location.host}/term\`);
                     
                     ws.onopen = () => {
                         setInterval(() => {
@@ -83,14 +101,18 @@ const server = http.createServer((req, res) => {
             </body>
             </html>
         `);
+    } else if (req.url.startsWith('/xapi')) {
+        // Xray HTTP/XHTTP 流量转发
+        proxy.web(req, res, { target: 'http://127.0.0.1:1001' });
     } else {
-        res.writeHead(404);
-        res.end('Not Found');
+        // 默认流量转发给 Caddy
+        proxy.web(req, res, { target: 'http://127.0.0.1:8080' });
     }
 });
 
 // 2. 挂载 WebSocket 服务
-const wss = new WebSocketServer({ server });
+// 【修改】：关闭自动接管所有升级请求 (noServer: true)，改由我们在底层按路径手动分发
+const wss = new WebSocketServer({ noServer: true });
 
 wss.on('connection', (ws) => {
     let authenticated = false;
@@ -172,6 +194,22 @@ wss.on('connection', (ws) => {
             shell.kill();
         }
     });
+});
+
+// 【新增】：手动拦截底层的协议升级事件，对 WebSocket 流量进行分发
+server.on('upgrade', (req, socket, head) => {
+    if (req.url === '/term' || req.url.startsWith('/term/')) {
+        // 如果是 /term，交给上面的 wss (终端服务) 处理
+        wss.handleUpgrade(req, socket, head, (ws) => {
+            wss.emit('connection', ws, req);
+        });
+    } else if (req.url.startsWith('/xapi')) {
+        // 如果是 /xapi，代理给 Xray 的 WebSocket 端口
+        proxy.ws(req, socket, head, { target: 'http://127.0.0.1:1001' });
+    } else {
+        // 剩下的全发给 Caddy 处理
+        proxy.ws(req, socket, head, { target: 'http://127.0.0.1:8080' });
+    }
 });
 
 server.listen(PORT, () => {
