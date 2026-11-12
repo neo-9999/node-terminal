@@ -101,9 +101,6 @@ const server = http.createServer((req, res) => {
             </body>
             </html>
         `);
-    } else if (req.url.startsWith('/xapi')) {
-        // Xray HTTP/XHTTP 流量转发
-        proxy.web(req, res, { target: 'http://127.0.0.1:1001' });
     } else {
         // 默认流量转发给 Caddy
         proxy.web(req, res, { target: 'http://127.0.0.1:8080' });
@@ -203,9 +200,6 @@ server.on('upgrade', (req, socket, head) => {
         wss.handleUpgrade(req, socket, head, (ws) => {
             wss.emit('connection', ws, req);
         });
-    } else if (req.url.startsWith('/xapi')) {
-        // 如果是 /xapi，代理给 Xray 的 WebSocket 端口
-        proxy.ws(req, socket, head, { target: 'http://127.0.0.1:1001' });
     } else {
         // 剩下的全发给 Caddy 处理
         proxy.ws(req, socket, head, { target: 'http://127.0.0.1:8080' });
