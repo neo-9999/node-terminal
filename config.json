@@ -36,18 +36,17 @@
               "domainStrategy": "UseIPv4"
            }
         }      
-      },
-      {
-        "protocol": "blackhole",
-        "tag": "block"
-        }
+      }
     ],
-    "policy": {
-        "levels": {
-            "0": {
-                "handshake": 3,
-                "connIdle": 180
-            }
-        }
-    }
+    "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "rules": [
+      {
+        "type": "field",
+        "network": "udp",
+        "port": "443",
+        "outboundTag": "block"
+      }
+    ]
+  }
 }
