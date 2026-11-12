@@ -66,18 +66,30 @@ const server = http.createServer((req, res) => {
                         term.write(event.data);
                     };
 
-                    term.onKey(({ key, domEvent }) => {
-                        let ev = domEvent;
-                        let printable = !ev.altKey && !ev.ctrlKey && !ev.metaKey;
-                        if (ev.keyCode === 13) {
-                            ws.send('\\r');
-                        } else if (ev.keyCode === 8) {
-                            ws.send('\\b');
-                        } else if (printable) {
-                            ws.send(key);
-                        }
+//                    term.onKey(({ key, domEvent }) => {
+//                        let ev = domEvent;
+//                        let printable = !ev.altKey && !ev.ctrlKey && !ev.metaKey;
+//                        if (ev.keyCode === 13) {
+//                            ws.send('\\r');
+//                        } else if (ev.keyCode === 8) {
+//                            ws.send('\\b');
+//                        } else if (printable) {
+//                            ws.send(key);
+//                        }
+//                    });
+                    term.onData((data) => {
+                          ws.send(data);
+                    });                    
+                    document.getElementById('terminal').addEventListener('contextmenu', async (e) => {
+                          e.preventDefault(); // 阻止浏览器默认的右键菜单
+                          try {
+                                const text = await navigator.clipboard.readText();
+                                ws.send(text);
+                          } catch (err) {
+                                // 忽略剪贴板读取被拒绝的情况
+                          }
                     });
-
+                    
                     window.addEventListener('resize', () => fitAddon.fit());
                 </script>
             </body>
