@@ -9,6 +9,7 @@
   "dependencies": {
     "dotenv": "^18.0.9",
     "node-pty": "^1.0.0",
+    "http-proxy": "^1.18.1",
     "ws": "^8.16.0"
   }
 }
