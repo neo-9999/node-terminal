@@ -1,20 +1,29 @@
 const http = require('http');
 const { spawn, execSync } = require('child_process');
 const path = require('path');
-const { WebSocketServer } = require('ws');
-//for download files.
 const fs = require('fs');
+const os = require('os');
+const { WebSocketServer } = require('ws');
 const pty = require('node-pty');
 
 require('dotenv').config();
-const PORT = process.env.PORT || 14484;
-const PASSWORD = process.env.PASSWORD ||'mysecret.#';
-const cfToken = process.env.CF_TOKEN || '' ;
 
+const PORT = process.env.PORT || 14484;
+const PASSWORD = process.env.PASSWORD || 'mysecret.#';
+const cfToken = process.env.CF_TOKEN || '';
+
+// 优先使用环境变量 HOME，其次 os.homedir()，最后兜底 /tmp
+const WORK_DIR = process.env.HOME || os.homedir() || '/tmp';
+const BINARIES = ['caddy', 'xray', 'cloudflared'];
+
+// 确保可写工作目录存在
+if (!fs.existsSync(WORK_DIR)) {
+    fs.mkdirSync(WORK_DIR, { recursive: true });
+}
 
 // 1. 创建 HTTP 服务，托管基于 xterm.js 的网页终端界面
 const server = http.createServer((req, res) => {
-// 新增：专门给 UptimeRobot 用的防缓存监控接口
+    // 专门给 UptimeRobot 用的防缓存监控接口
     if (req.url === '/ping') {
         res.writeHead(200, {
             'Content-Type': 'text/plain',
@@ -22,10 +31,10 @@ const server = http.createServer((req, res) => {
             'Pragma': 'no-cache',
             'Expires': '0'
         });
-        // 返回带有当前时间戳的动态内容，确保每次响应都不一样
         res.end('active:' + Date.now());
         return;
-    }    
+    }
+
     if (req.url === '/') {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(`
@@ -50,47 +59,47 @@ const server = http.createServer((req, res) => {
                     term.open(document.getElementById('terminal'));
                     fitAddon.fit();
 
-                    // 自动适配 HTTPS 对应的 wss:// 协议
                     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
                     const ws = new WebSocket(\`\${protocol}//\${location.host}\`);
-                    
+
+                    function sendMsg(obj) {
+                        if (ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify(obj));
+                        }
+                    }
+
+                    function syncSize() {
+                        fitAddon.fit();
+                        sendMsg({ type: 'resize', cols: term.cols, rows: term.rows });
+                    }
+
+                    let pingTimer = null;
+
                     ws.onopen = () => {
-                        setInterval(() => {
-                            if (ws.readyState === 1) { // 1 代表 WebSocket.OPEN
-                                ws.send('\\x00'); 
-                            }
-                        }, 20000);
-                    };
-                    
-                    ws.onmessage = (event) => {
-                        term.write(event.data);
+                        syncSize();
+                        pingTimer = setInterval(() => sendMsg({ type: 'ping' }), 20000);
                     };
 
-//                    term.onKey(({ key, domEvent }) => {
-//                        let ev = domEvent;
-//                        let printable = !ev.altKey && !ev.ctrlKey && !ev.metaKey;
-//                        if (ev.keyCode === 13) {
-//                            ws.send('\\r');
-//                        } else if (ev.keyCode === 8) {
-//                            ws.send('\\b');
-//                        } else if (printable) {
-//                            ws.send(key);
-//                        }
-//                    });
+                    ws.onmessage = (event) => {
+                        if (event.data !== '\\x00') {
+                            term.write(event.data);
+                        }
+                    };
+
+                    ws.onclose = () => {
+                        if (pingTimer) clearInterval(pingTimer);
+                        term.write('\\r\\n\\x1b[31m[Connection closed]\\x1b[0m\\r\\n');
+                    };
+
                     term.onData((data) => {
-                          ws.send(data);
-                    });                    
-//                    document.getElementById('terminal').addEventListener('contextmenu', async (e) => {
-//                          e.preventDefault(); // 阻止浏览器默认的右键菜单
-//                          try {
-//                                const text = await navigator.clipboard.readText();
-//                                ws.send(text);
-//                          } catch (err) {
-//                                // 忽略剪贴板读取被拒绝的情况
-//                          }
-//                    });
-                    
-                    window.addEventListener('resize', () => fitAddon.fit());
+                        sendMsg({ type: 'input', data });
+                    });
+
+                    let resizeTimer = null;
+                    window.addEventListener('resize', () => {
+                        clearTimeout(resizeTimer);
+                        resizeTimer = setTimeout(syncSize, 100);
+                    });
                 </script>
             </body>
             </html>
@@ -107,61 +116,73 @@ const wss = new WebSocketServer({ server });
 wss.on('connection', (ws) => {
     let authenticated = false;
     let passBuffer = '';
-    let cmdBuffer = '';
     let shell = null;
-    
+    let termSize = { cols: 80, rows: 30 };
+
     const heartbeatInterval = setInterval(() => {
         if (ws.readyState === ws.OPEN) {
-            ws.ping();       // 照顾标准 WebSocket 协议
-            ws.send('\x00'); // 照顾霸道的 CDN 缓存
+            ws.ping();
+            ws.send('\x00');
         } else {
             clearInterval(heartbeatInterval);
         }
     }, 20000);
-    
-    ws.send("Password:");
 
-    ws.on('message', (message) => {
-        const input = message.toString();
-        if (input === '\x00') return;  //ignore keep alive msg
-        
+    ws.send('Password: ');
+
+    ws.on('message', (rawMessage) => {
+        let msg;
+        try {
+            msg = JSON.parse(rawMessage.toString());
+        } catch {
+            // 兼容非 JSON 的纯文本客户端
+            msg = { type: 'input', data: rawMessage.toString() };
+        }
+
+        if (msg.type === 'ping') return;
+
+        if (msg.type === 'resize') {
+            const cols = Math.max(1, parseInt(msg.cols, 10) || 80);
+            const rows = Math.max(1, parseInt(msg.rows, 10) || 30);
+            termSize = { cols, rows };
+            if (shell) {
+                try { shell.resize(cols, rows); } catch (_) {}
+            }
+            return;
+        }
+
+        if (msg.type !== 'input' || typeof msg.data !== 'string') return;
+        const input = msg.data;
+
+        // 未认证阶段：处理密码输入
         if (!authenticated) {
             if (input.includes('\r') || input.includes('\n')) {
                 if (passBuffer === PASSWORD) {
                     authenticated = true;
-                    ws.send("\r\nAccess Granted. Welcome to the container shell!\r\n\r\n");
-                    
-                  
-                    // 使用系统自带的 /bin/sh（Alpine 默认自带，绝对不需要安装 Python）
-                  
+                    passBuffer = '';
+                    ws.send('\r\nAccess Granted. Welcome to the container shell!\r\n\r\n');
+
                     shell = pty.spawn('/bin/sh', ['-l'], {
-                        name: 'xterm-color',
-                        cols: 80,
-                        rows: 30,
-                        cwd: __dirname ,
-                        env: process.env
+                        name: 'xterm-256color',
+                        cols: termSize.cols,
+                        rows: termSize.rows,
+                        cwd: WORK_DIR,
+                        env: { ...process.env, HOME: WORK_DIR, TERM: 'xterm-256color' }
                     });
 
-                    
-                    // 实时将 shell 输出返回给网页
                     shell.onData((data) => {
-                        ws.send(data);
-                    });
-                    
-                    ws.on('message', (msg) => {
-                        if ( shell ) {
-                          let input = msg.toString();
-                          if (input === '\x7f' || input === '\b') shell.write('\x7f');
-                          else if ( !(input === '\x00') ) shell.write(msg);
+                        if (ws.readyState === ws.OPEN) {
+                            ws.send(data);
                         }
-                     });
+                    });
 
-
-                    shell.on('exit', () => {
-                        ws.close();
+                    shell.onExit(() => {
+                        if (ws.readyState === ws.OPEN) {
+                            ws.close();
+                        }
                     });
                 } else {
-                    ws.send("\r\nAccess denied.\r\nPassword:");
+                    ws.send('\r\nAccess denied.\r\nPassword: ');
                     passBuffer = '';
                 }
             } else if (input === '\b' || input === '\x7f') {
@@ -169,111 +190,120 @@ wss.on('connection', (ws) => {
                     passBuffer = passBuffer.slice(0, -1);
                     ws.send('\b \b');
                 }
-            } else {
+            } else if (input >= ' ') {
                 passBuffer += input;
-                ws.send('*');
+                ws.send('*'.repeat(input.length));
             }
-        } 
+            return;
+        }
+
+        // 已认证阶段：转发输入给 PTY
+        if (shell) {
+            shell.write(input === '\b' ? '\x7f' : input);
+        }
     });
 
     ws.on('close', () => {
-        if (heartbeatInterval ){
-            clearInterval(heartbeatInterval);
-        }
+        clearInterval(heartbeatInterval);
         if (shell) {
             shell.kill();
+            shell = null;
         }
     });
 });
 
-server.listen(PORT, () => {
-    console.log(`HTTPS/WS Terminal server running on port ${PORT}`);
-    initAndExtractBinaries();
-    initBackgroundServices();
-});
-
+// 3. 初始化并解压二进制文件到可写目录
 function initAndExtractBinaries() {
-    const binDir = __dirname;
-    const markerFile = path.join(binDir, '.extracted'); // 用一个标记文件防止每次重启重复下载
+    const markerFile = path.join(WORK_DIR, '.extracted');
+    const profilePath = path.join(WORK_DIR, '.profile');
 
-
-    const profilePath = path.join( __dirname, '.profile');
     try {
-        fs.writeFileSync(profilePath, 'alias ls="ls --color"\n' , 'utf8');
-        console.log('[Init] Successed to prepare .profile ');
+        if (!fs.existsSync(profilePath)) {
+            fs.writeFileSync(profilePath, 'alias ls="ls --color"\n', 'utf8');
+            console.log('[Init] Prepared .profile in', WORK_DIR);
+        }
     } catch (err) {
         console.error('[Init] Failed to prepare .profile:', err.message);
     }
-    
-    // 如果已经解压过了，直接跳过
+
     if (fs.existsSync(markerFile)) {
-        console.log('[Init] Binaries already extracted.');
+        console.log('[Init] Binaries already extracted in', WORK_DIR);
         return;
     }
 
-    const archivePath = path.join(binDir, 'binaries.tar.gz');
+    const archivePath = path.join(WORK_DIR, 'binaries.tar.gz');
     const downloadUrl = 'https://w0.cone.pp.ua/binary_x64.tar.gz';
-    
+
     let downloader = 'none';
     try {
-       downloader = execSync(
+        downloader = execSync(
             'command -v curl >/dev/null 2>&1 && echo "curl" || (command -v wget >/dev/null 2>&1 && echo "wget" || echo "none")'
         ).toString().trim();
-        console.log(`[Init] Detected downloader tool: ${downloader}`);
+        console.log(`[Init] Detected downloader: ${downloader}`);
     } catch (err) {
         console.error('[Init] Failed to detect downloader:', err.message);
+        return;
     }
-    
+
+    if (downloader === 'none') {
+        console.error('[Init] Neither curl nor wget is available.');
+        return;
+    }
+
     try {
         console.log('[Init] Downloading binaries archive...');
-        if (downloader === 'curl') {
-            console.log( `curl -o "${archivePath}" "${downloadUrl}` );
-            execSync(`curl -o "${archivePath}" "${downloadUrl}"`, { stdio: 'inherit' });
+        const downloadCmd = downloader === 'curl'
+            ? `curl -fsSL -o "${archivePath}" "${downloadUrl}"`
+            : `wget -q -O "${archivePath}" "${downloadUrl}"`;
+
+        execSync(downloadCmd, { stdio: 'inherit' });
+
+        console.log('[Init] Extracting archive to', WORK_DIR);
+        execSync(`tar -xzf "${archivePath}" -C "${WORK_DIR}"`, { stdio: 'inherit' });
+
+        console.log('[Init] Setting executable permissions...');
+        for (const name of BINARIES) {
+            const binPath = path.join(WORK_DIR, name);
+            if (fs.existsSync(binPath)) {
+                fs.chmodSync(binPath, 0o755);
+            }
         }
-        else if (downloader === 'wget') {
-            console.log( `wget -O "${archivePath}" "${downloadUrl}"` );
-            execSync(`wget -O "${archivePath}" "${downloadUrl}"`, { stdio: 'inherit' });
-        }
-        
-        
-        if (fs.existsSync(archivePath)) {
-            console.log('[Init] Extracting archive...');
-              // 2. 用系统自带的 tar 解压到当前目录
-            execSync(`tar -xzf "${archivePath}" -C "${binDir}"`, { stdio: 'inherit' });
 
-            console.log('[Init] Setting executable permissions...');
-            // 3. 赋予所有二进制文件可执行权限
-            execSync(`chmod +x "${path.join(binDir, 'caddy')}" "${path.join(binDir, 'xray')}" "${path.join(binDir, 'cloudflared')}"`);
-
-            // 4. 清理掉压缩包以节省容器空间
-            console.log('[Init] Flush downloaded file ...');
-            fs.unlinkSync(archivePath);
-
-            // 5. 创建标记文件
-            fs.writeFileSync(markerFile, 'done');
-            console.log('[Init] Binaries ready!');
-         }
-         else {
-            console.error('[Init] Failed to setup binaries: Can not find archived binary files');
-         } 
-
+        fs.writeFileSync(markerFile, 'done');
+        console.log('[Init] Binaries ready!');
     } catch (err) {
         console.error('[Init] Failed to setup binaries:', err.message);
+    } finally {
+        if (fs.existsSync(archivePath)) {
+            try { fs.unlinkSync(archivePath); } catch (_) {}
+        }
     }
 }
 
-// ====== Background Services ======
-function startDaemon(name, command, args) {
+// 4. 后台守护服务
+function startDaemon(name, command, args, extraEnv = {}) {
+    if (!fs.existsSync(command)) {
+        console.error(`[Daemon] Binary not found for ${name}: ${command}`);
+        return;
+    }
+
     console.log(`[Daemon] Starting ${name}...`);
     let proc;
     try {
         proc = spawn(command, args, {
-          cwd: __dirname,
-          stdio: ['ignore', 'pipe', 'pipe']
+            cwd: WORK_DIR,
+            // 确保 Caddy/Xray 等进程的数据和缓存目录都落在可写的 WORK_DIR
+            env: {
+                ...process.env,
+                HOME: WORK_DIR,
+                XDG_DATA_HOME: path.join(WORK_DIR, '.local', 'share'),
+                XDG_CONFIG_HOME: path.join(WORK_DIR, '.config'),
+                ...extraEnv
+            },
+            stdio: ['ignore', 'pipe', 'pipe']
         });
     } catch (err) {
-        console.error(`[Daemon] Failed to start ${name} synchronously: ${err.message}. Restarting in 5s...`);
-        //setTimeout(() => startDaemon(name, command, args), 5000);
+        console.error(`[Daemon] Failed to start ${name}: ${err.message}`);
         return;
     }
 
@@ -286,37 +316,48 @@ function startDaemon(name, command, args) {
             console.error(`[${name} Error] ${data.toString().trim()}`);
         });
     }
-  
+
     proc.on('close', (code) => {
-        console.log(`[Daemon] ${name} exited with code ${code}. Restarting in 5s...`);
-        //setTimeout(() => startDaemon(name, command, args), 5000);
+        console.log(`[Daemon] ${name} exited with code ${code}.`);
     });
 }
 
 function initBackgroundServices() {
-    const xrayBin = path.join(__dirname, 'xray');
-    const cfBin = path.join(__dirname, 'cloudflared');
-    const caddyBin = path.join(__dirname, 'caddy');
-    
+    const caddyBin = path.join(WORK_DIR, 'caddy');
+    const xrayBin = path.join(WORK_DIR, 'xray');
+    const cfBin = path.join(WORK_DIR, 'cloudflared');
+
+    // 直接指向 /app（即 __dirname）下从 GitHub 同步的只读配置
     const caddyConfig = path.join(__dirname, 'Caddyfile');
     const xrayConfig = path.join(__dirname, 'config.json');
-    
-    try {
-        execSync(`chmod +x "${xrayBin}" "${cfBin}" "${caddyBin}"`);
-    } catch (e) {}
 
     startDaemon('Caddy', caddyBin, ['run', '--config', caddyConfig]);
     startDaemon('Xray', xrayBin, ['run', '-c', xrayConfig]);
 
-    
-    
-    startDaemon('Cloudflared', cfBin, [
-        'tunnel', '--no-autoupdate', '--edge-ip-version', '4', '--loglevel' , 'error' , '--protocol', 'http2', 'run', '--token', cfToken
-    ]);
+    if (cfToken) {
+        // 通过 TUNNEL_TOKEN 环境变量传递，命令行不再暴露明文
+        startDaemon(
+            'Cloudflared',
+            cfBin,
+            [
+                'tunnel', '--no-autoupdate', '--edge-ip-version', '4',
+                '--loglevel', 'error', '--protocol', 'http2', 'run'
+            ],
+            { TUNNEL_TOKEN: cfToken }
+        );
+    } else {
+        console.log('[Daemon] CF_TOKEN is empty, skipping Cloudflared.');
+    }
 }
 
+// 5. 启动服务与定时保活
+server.listen(PORT, () => {
+    console.log(`HTTPS/WS Terminal server running on port ${PORT} (WORK_DIR: ${WORK_DIR})`);
+    initAndExtractBinaries();
+    initBackgroundServices();
+});
+
 setInterval(() => {
-    const http = require('http');
     http.get('http://cp.cloudflare.com/generate_204', (res) => {
         res.on('data', () => {});
     }).on('error', () => {});
