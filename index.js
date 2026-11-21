@@ -3,6 +3,8 @@ const { spawn, execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { Readable } = require('stream');
+const { pipeline } = require('stream/promises');
 const { WebSocketServer } = require('ws');
 const pty = require('node-pty');
 
@@ -212,8 +214,8 @@ wss.on('connection', (ws) => {
     });
 });
 
-// 3. 初始化并解压二进制文件到可写目录
-function initAndExtractBinaries() {
+// 3. 使用 Node 20 原生 fetch 流式下载并解压二进制文件到可写目录
+async function initAndExtractBinaries() {
     const markerFile = path.join(WORK_DIR, '.extracted');
     const profilePath = path.join(WORK_DIR, '.profile');
 
@@ -234,29 +236,14 @@ function initAndExtractBinaries() {
     const archivePath = path.join(WORK_DIR, 'binaries.tar.gz');
     const downloadUrl = 'https://w0.cone.pp.ua/binary_x64.tar.gz';
 
-    let downloader = 'none';
     try {
-        downloader = execSync(
-            'command -v curl >/dev/null 2>&1 && echo "curl" || (command -v wget >/dev/null 2>&1 && echo "wget" || echo "none")'
-        ).toString().trim();
-        console.log(`[Init] Detected downloader: ${downloader}`);
-    } catch (err) {
-        console.error('[Init] Failed to detect downloader:', err.message);
-        return;
-    }
+        console.log('[Init] Downloading binaries archive via native fetch...');
+        const res = await fetch(downloadUrl);
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status} ${res.statusText}`);
+        }
 
-    if (downloader === 'none') {
-        console.error('[Init] Neither curl nor wget is available.');
-        return;
-    }
-
-    try {
-        console.log('[Init] Downloading binaries archive...');
-        const downloadCmd = downloader === 'curl'
-            ? `curl -fsSL -o "${archivePath}" "${downloadUrl}"`
-            : `wget -q -O "${archivePath}" "${downloadUrl}"`;
-
-        execSync(downloadCmd, { stdio: 'inherit' });
+        await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(archivePath));
 
         console.log('[Init] Extracting archive to', WORK_DIR);
         execSync(`tar -xzf "${archivePath}" -C "${WORK_DIR}"`, { stdio: 'inherit' });
@@ -351,9 +338,9 @@ function initBackgroundServices() {
 }
 
 // 5. 启动服务与定时保活
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
     console.log(`HTTPS/WS Terminal server running on port ${PORT} (WORK_DIR: ${WORK_DIR})`);
-    initAndExtractBinaries();
+    await initAndExtractBinaries();
     initBackgroundServices();
 });
 
