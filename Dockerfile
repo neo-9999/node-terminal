@@ -15,7 +15,7 @@ RUN npm install --omit=dev && npm cache clean --force
 # 第二阶段：运行阶段 (Runner)
 FROM node:20-alpine
 WORKDIR /app
-
+RUN apk add --no-cache curl ca-certificates
 # 核心优化 3：从 builder 提取已经编译好的 node_modules，不带 Python 和编译垃圾
 COPY --from=builder /app/node_modules ./node_modules
 
